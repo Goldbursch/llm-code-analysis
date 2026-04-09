@@ -44,14 +44,43 @@ jobs:
         run: echo "GITHUB_BEFORE_SHA=${{ github.event.before }}" >> "$GITHUB_ENV"
 
       # ------------------------------------------------------------------ #
+      # Verify the OpenAI secret is available before running the analysis.  #
+      # This prints only whether the secret exists, never the secret value. #
+      # ------------------------------------------------------------------ #
+      - name: Check secret presence
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY is MISSING"
+            exit 1
+          else
+            echo "OPENAI_API_KEY is present"
+          fi
+
+      # ------------------------------------------------------------------ #
+      # Secrets are not exposed to workflows triggered from forked PRs.     #
+      # Skip the OpenAI call in that case instead of failing with a 401.    #
+      # ------------------------------------------------------------------ #
+      - name: Skip on forked PRs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "Skipping OpenAI review because secrets are unavailable on forked pull requests."
+
+      # ------------------------------------------------------------------ #
       # Run the LLM analysis.                                               #
       # ------------------------------------------------------------------ #
       - name: Run LLM code analysis
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Override the model via a repository variable if desired.
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scripts/analyze_code.py
 
       # ------------------------------------------------------------------ #
